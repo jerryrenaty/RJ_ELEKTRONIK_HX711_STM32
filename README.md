@@ -1,86 +1,79 @@
-# Guide d'Utilisation du Driver HX711 pour STM32 HAL
+# Driver HX711 pour STM32 (HAL)
 
-Ce module permet de gérer le convertisseur analogique-numérique 24 bits **HX711** dédié aux balances et aux capteurs de pesée industriels.
+Ce dépôt contient un driver optimisé et corrigé pour le convertisseur analogique-numérique 24 bits **HX711**, spécifiquement conçu pour les microcontrôleurs STM32 utilisant la bibliothèque **HAL**. 
 
----
+Il intègre des correctifs majeurs concernant l'extension de signe (24 bits vers 32 bits), la gestion des gains, et la sécurité temporelle pour éviter la mise en veille accidentelle du composant.
 
-## 📌 1. Configuration Matérielle (CubeMX)
+## ✨ Fonctionnalités
+* ⚙️ **Configuration Simplifiée** : Utilisation directe des macros matérielles définies dans CubeMX.
+* 🛡️ **Lecture Sécurisée** : Désactivation temporaire des interruptions pendant la communication critique pour éviter le mode *Power Down* du HX711.
+* 🔄 **Correction de Bit** : Alignement de décalage de bits corrigé pour garantir la précision du poids faible.
+* ⚖️ **Zéro Flexible** : Prise en charge des valeurs négatives de pesée (suppression du blocage à `0.0f`).
 
-Avant d'utiliser le code, configurez vos broches dans STM32CubeMX :
+## 📌 Brochage par Défaut
+Le driver est configuré par défaut sur le port **GPIOB**. Si vous utilisez d'autres broches, modifiez-les dans le fichier `main.h` (via CubeMX) ou directement dans le fichier `RJ_ELEKTRONIK_HX711_STM32.h`.
 
-*   **Broche SCK (Horloge) :** 
-    *   Mode : `GPIO_Output`
-    *   Vitesse : `High Speed` ou `Very High Speed`
-    *   Niveau initial : `Low`
-*   **Broche DOUT / DT (Données) :**
-    *   Mode : `GPIO_Input`
-    *   Pull-up/Pull-down : `No pull-up and no pull-down`
 
----
+| Signal HX711 | Broche STM32 | Fonction |
+| :--- | :--- | :--- |
+| **SCK** (Clock) | `GPIOB - Pin 12` | Sortie Horloge numérique |
+| **DT** (Data) | `GPIOB - Pin 13` | Entrée Données numériques |
 
-## 🛠️ 2. Étape Essentielle : La Calibration
+## 🚀 Guide d'Utilisation rapide
 
-Le capteur renvoie une valeur numérique brute. Pour obtenir un poids en grammes, vous devez calculer le `calibration_factor`.
-
-### Protocole de calcul du facteur :
-1. Démarrez la balance à vide et lancez la fonction `HX711_Tare()`.
-2. Déposez un objet dont vous connaissez le poids exact (ex: un poids de 500g).
-3. Lisez la valeur brute renvoyée par le capteur via `HX711_Read()`.
-4. Utilisez la formule suivante :
-   $$\text{Facteur de calibration} = \frac{\text{Valeur Brute} - \text{Offset de la Tare}}{\text{Poids Réel en Grammes}}$$
-5. Configurez cette valeur dans la structure : `hx711.calibration_factor = calcul_facteur;`
-
----
-
-## 💻 3. Exemple Complet d'Intégration (`main.c`)
-
-Voici comment intégrer le driver dans votre boucle principale STM32 :
+### 1. Structure globale et Initialisation
+Déclarez le handle de gestion du HX711 dans votre fichier `main.c`, puis initialisez-le avec le gain souhaité (ex: `HX711_GAIN_128`).
 
 ```c
-#include "main.h"
 #include "RJ_ELEKTRONIK_HX711_STM32.h"
-#include <stdio.h>
 
-// Instance globale du capteur
-HX711_HandleTypeDef MyScale;
-float current_weight = 0.0f;
-char uart_buffer[50];
+HX711_HandleTypeDef hx711;
 
 int main(void) {
-    // Initialisations génériques du système STM32 HAL
+    // Initialisation du matériel STM32 (HAL_Init, SystemClock_Config, MX_GPIO_Init...)
     HAL_Init();
-    SystemClock_Config();
-    MX_GPIO_Init();
-    MX_USART1_UART_Init();
-
-    // 1. Initialisation du module (Port A, Pin 0 pour CLK / Pin 1 pour DT)
-    HX711_Init(&MyScale, GPIOA, GPIO_PIN_0, GPIOA, GPIO_PIN_1, HX711_GAIN_128);
-
-    // 2. Configuration du facteur calculé pendant la phase de calibration
-    MyScale.calibration_factor = 423.5f; // Exemple de valeur
-
-    // 3. Réalisation de la tare au démarrage (Moyenne sur 10 mesures)
-    HAL_UART_Transmit(&huart1, (uint8_t*)"Tare en cours...\r\n", 18, 100);
-    HX711_Tare(&MyScale, 10);
-    HAL_UART_Transmit(&huart1, (uint8_t*)"Balance Prete !\r\n", 17, 100);
+    
+    // Initialisation du driver HX711
+    HX711_Init(&hx711, HX711_GAIN_128);
+    
+    // Effectuer une tare automatique (20 échantillons)
+    HX711_Tare(&hx711, 20);
 
     while (1) {
-        // 4. Lecture du poids lissé sur 5 échantillons
-        current_weight = HX711_GetWeightGram(&MyScale, 5);
-
-        // 5. Affichage du résultat sur le port série UART
-        sprintf(uart_buffer, "Poids : %.2f g\r\n", current_weight);
-        HAL_UART_Transmit(&huart1, (uint8_t*)uart_buffer, strlen(uart_buffer), 100);
-
-        HAL_Delay(500); // Rafraîchissement toutes les 500ms
+        // Lecture du poids toutes les 200ms (moyenne sur 5 échantillons)
+        float poids = HX711_GetWeightGram(&hx711, 5);
+        
+        // Votre code d'affichage (ex: UART, LCD ou OLED)
+        
+        HAL_Delay(200);
     }
 }
 ```
 
----
+### 2. Calibration de la balance
+Pour afficher un poids exact en grammes, vous devez configurer la variable `calibration_factor`. 
 
-## 🔍 4. Résolution des Problèmes Récurrents
+1. Laissez la balance à vide et démarrez le programme (la fonction `HX711_Tare` fixe le point zéro).
+2. Placez un objet dont vous connaissez précisément le poids (ex: un poids étalon de 500g).
+3. Lisez la valeur brute renvoyée par `hx711.last_raw_value`.
+4. Calculez le facteur : `calibration_factor = (Valeur Brute - Valeur Offset) / Poids Réel`.
+5. Appliquez ce facteur juste après l'initialisation dans votre code :
+   ```c
+   hx711.calibration_factor = 423.5f; // Remplacez par votre valeur calculée
+   ```
 
-*   **Le poids reste bloqué à 0 :** Vérifiez le câblage électrique du pont de jauge (E+, E-, A+, A-). Un faux contact coupe la transmission.
-*   **La mesure fluctue énormément :** Augmentez le nombre d'échantillons (paramètre `samples` passé à `HX711_GetWeightGram`). Assurez-vous que l'alimentation 5V/3.3V du module est stable et filtrée.
-*   **Les valeurs augmentent quand on retire du poids :** Inversez les fils de signal `A+` et `A-` de votre jauge de contrainte sur le module HX711.
+## 🛠️ Fonctions disponibles
+
+* `void HX711_Init(HX711_HandleTypeDef *hx711, HX711_Gain initial_gain)`  
+  Initialise la structure, configure les GPIOs (SCK en sortie, DT en entrée) et applique le gain initial.
+* `int32_t HX711_Read(HX711_HandleTypeDef *hx711)`  
+  Lit une valeur brute 24 bits signée directement depuis le capteur.
+* `void HX711_Tare(HX711_HandleTypeDef *hx711, uint8_t samples)`  
+  Calcule la moyenne des échantillons à vide pour définir l'offset (Zéro).
+* `float HX711_GetWeightGram(HX711_HandleTypeDef *hx711, uint8_t samples)`  
+  Convertit la lecture brute filtrée en grammes à l'aide du facteur de calibration.
+* `void HX711_SetGain(HX711_HandleTypeDef *hx711, HX711_Gain new_gain)`  
+  Modifie logiciellement et matériellement le gain/canal de lecture du HX711.
+
+## 📝 Licence
+Ce projet est distribué sous licence MIT. Libre à vous de l'utiliser et de l'adapter dans vos projets commerciaux ou personnels.
