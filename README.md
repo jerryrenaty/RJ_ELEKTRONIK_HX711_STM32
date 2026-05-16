@@ -62,7 +62,6 @@ HAL_TIM_Base_Start_IT(&htim3);
 
 // Initialisation du capteur de poids
 HX711_Init(&hx711, HX711_GAIN_128);
-hx711.calibration_factor = 91.07f; // Facteur d'étalonnage précis
 
 HAL_Delay(500);
 HX711_Tare(&hx711, 20); // Fixe le point zéro à vide sur 20 échantillons
